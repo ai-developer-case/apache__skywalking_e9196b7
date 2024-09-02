@@ -52,16 +52,18 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
     public void prepare() {
         queue = new LinkedBlockingQueue<>(Config.Jvm.BUFFER_SIZE);
         ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
+        LOGGER.info("JVMMetricsSender prepared");
     }
 
     @Override
     public void boot() {
-
+        LOGGER.info("JVMMetricsSender boot");
     }
 
     public void offer(JVMMetric metric) {
         // drop last message and re-deliver
         if (!queue.offer(metric)) {
+            LOGGER.warn("JVMMetricsSender queue is full, old data will be overwritten");
             queue.poll();
             queue.offer(metric);
         }
@@ -84,6 +86,7 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
                 }
             } catch (Throwable t) {
                 LOGGER.error(t, "send JVM metrics to Collector fail.");
+                statusChanged(GRPCChannelStatus.DISCONNECT);
             }
         }
     }
@@ -93,6 +96,9 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
         if (GRPCChannelStatus.CONNECTED.equals(status)) {
             Channel channel = ServiceManager.INSTANCE.findService(GRPCChannelManager.class).getChannel();
             stub = JVMMetricReportServiceGrpc.newBlockingStub(channel);
+            LOGGER.info("JVMMetricsSender status changed to CONNECTED");
+        } else {
+            LOGGER.info("JVMMetricsSender status changed to DISCONNECT");
         }
         this.status = status;
     }
@@ -104,6 +110,12 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
 
     @Override
     public void shutdown() {
-
+        LOGGER.info("JVMMetricsSender shutdown");
     }
 }
+
+
+
+
+
+
