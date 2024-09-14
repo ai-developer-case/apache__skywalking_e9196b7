@@ -81,6 +81,13 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
                     Commands commands = stub.withDeadlineAfter(GRPC_UPSTREAM_TIMEOUT, TimeUnit.SECONDS)
                                             .collect(builder.build());
                     ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
+                } catch (Throwable t) {
+                    reportError();
+                    LOGGER.error(t, "send JVM metrics to Collector fail.");
+                }
+            } catch (Throwable t) {
+                LOGGER.error(t, "send JVM metrics to Collector fail.");
+                    ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
                 }
             } catch (Throwable t) {
                 LOGGER.error(t, "send JVM metrics to Collector fail.");
@@ -107,3 +114,7 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
 
     }
 }
+    private void reportError() {
+        status = GRPCChannelStatus.DISCONNECT;
+        ServiceManager.INSTANCE.findService(GRPCChannelManager.class).statusChanged(status);
+    }
