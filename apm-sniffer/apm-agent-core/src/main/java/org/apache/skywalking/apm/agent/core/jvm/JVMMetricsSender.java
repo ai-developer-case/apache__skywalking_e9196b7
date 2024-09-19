@@ -42,6 +42,7 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Collector.GRPC_UP
 @DefaultImplementor
 public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListener {
     private static final ILog LOGGER = LogManager.getLogger(JVMMetricsSender.class);
+    private static final int MAX_RETRY_ATTEMPTS = 3;
 
     private volatile GRPCChannelStatus status = GRPCChannelStatus.DISCONNECT;
     private volatile JVMMetricReportServiceGrpc.JVMMetricReportServiceBlockingStub stub = null;
@@ -70,7 +71,8 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
     @Override
     public void run() {
         if (status == GRPCChannelStatus.CONNECTED) {
-            try {
+            for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+                try (Scope scope = ContextManager.createLocalSpan("JVMMetricsSender/sendMetrics")) {
                 JVMMetricCollection.Builder builder = JVMMetricCollection.newBuilder();
                 LinkedList<JVMMetric> buffer = new LinkedList<>();
                 queue.drainTo(buffer);
@@ -79,11 +81,18 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
                     builder.setService(Config.Agent.SERVICE_NAME);
                     builder.setServiceInstance(Config.Agent.INSTANCE_NAME);
                     Commands commands = stub.withDeadlineAfter(GRPC_UPSTREAM_TIMEOUT, TimeUnit.SECONDS)
-                                            .collect(builder.build());
-                    ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
+                                                    .collect(builder.build());
+                        ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
+                    }
+                    scope.close();
+                    return;
+                } catch (Throwable t) {
+                    if (attempt == MAX_RETRY_ATTEMPTS - 1) {
+                        status = GRPCChannelStatus.DISCONNECT;
+                        ServiceManager.INSTANCE.findService(GRPCChannelManager.class).statusChanged(status);
+                    }
+                    LOGGER.error(t, "send JVM metrics to Collector fail.");
                 }
-            } catch (Throwable t) {
-                LOGGER.error(t, "send JVM metrics to Collector fail.");
             }
         }
     }
