@@ -76,11 +76,17 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
                 queue.drainTo(buffer);
                 if (buffer.size() > 0) {
                     builder.addAllMetrics(buffer);
-                    builder.setService(Config.Agent.SERVICE_NAME);
-                    builder.setServiceInstance(Config.Agent.INSTANCE_NAME);
-                    Commands commands = stub.withDeadlineAfter(GRPC_UPSTREAM_TIMEOUT, TimeUnit.SECONDS)
-                                            .collect(builder.build());
-                    ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
+)
+                     builder.setService(Config.Agent.SERVICE_NAME);
+                     builder.setServiceInstance(Config.Agent.INSTANCE_NAME);
+                     try {
+                         Commands commands = stub.withDeadlineAfter(GRPC_UPSTREAM_TIMEOUT, TimeUnit.SECONDS)
+                                                 .collect(builder.build());
+                         ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
+                     } catch (Throwable t) {
+                         this.status = GRPCChannelStatus.DISCONNECT;
+                         LOGGER.error(t, "send JVM metrics to Collector fail.");
+                     }
                 }
             } catch (Throwable t) {
                 LOGGER.error(t, "send JVM metrics to Collector fail.");
@@ -93,6 +99,8 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
         if (GRPCChannelStatus.CONNECTED.equals(status)) {
             Channel channel = ServiceManager.INSTANCE.findService(GRPCChannelManager.class).getChannel();
             stub = JVMMetricReportServiceGrpc.newBlockingStub(channel);
+        } else {
+            LOGGER.info("JVMMetricsSender status changed to " + status);
         }
         this.status = status;
     }
