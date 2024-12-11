@@ -40,18 +40,21 @@ import org.apache.skywalking.apm.network.language.agent.v3.JVMMetricReportServic
 import static org.apache.skywalking.apm.agent.core.conf.Config.Collector.GRPC_UPSTREAM_TIMEOUT;
 
 @DefaultImplementor
-public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListener {
+public class JVMMetricsSender implements BootService, GRPCChannelListener {
     private static final ILog LOGGER = LogManager.getLogger(JVMMetricsSender.class);
 
-    private volatile GRPCChannelStatus status = GRPCChannelStatus.DISCONNECT;
     private volatile JVMMetricReportServiceGrpc.JVMMetricReportServiceBlockingStub stub = null;
 
     private LinkedBlockingQueue<JVMMetric> queue;
-
+    public void statusChanged(GRPCChannelStatus status) {/**...**/}
+    public void onComplete() {/**...**/}
+    public void shutdown() {/**...**/}
     @Override
     public void prepare() {
         queue = new LinkedBlockingQueue<>(Config.Jvm.BUFFER_SIZE);
         ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
+        Channel channel = ServiceManager.INSTANCE.findService(GRPCChannelManager.class).getChannel();
+        stub = JVMMetricReportServiceGrpc.newBlockingStub(channel);
     }
 
     @Override
@@ -69,34 +72,24 @@ public class JVMMetricsSender implements BootService, Runnable, GRPCChannelListe
 
     @Override
     public void run() {
-        if (status == GRPCChannelStatus.CONNECTED) {
-            try {
-                JVMMetricCollection.Builder builder = JVMMetricCollection.newBuilder();
-                LinkedList<JVMMetric> buffer = new LinkedList<>();
-                queue.drainTo(buffer);
-                if (buffer.size() > 0) {
-                    builder.addAllMetrics(buffer);
-                    builder.setService(Config.Agent.SERVICE_NAME);
-                    builder.setServiceInstance(Config.Agent.INSTANCE_NAME);
-                    Commands commands = stub.withDeadlineAfter(GRPC_UPSTREAM_TIMEOUT, TimeUnit.SECONDS)
-                                            .collect(builder.build());
-                    ServiceManager.INSTANCE.findService(CommandService.class).receiveCommand(commands);
-                }
-            } catch (Throwable t) {
-                LOGGER.error(t, "send JVM metrics to Collector fail.");
+        if (status == GRPCChannelStatus.CONNECTED && stub != null) {
+            // ...此处为省略代码...
             }
         }
     }
 
     @Override
     public void statusChanged(GRPCChannelStatus status) {
-        if (GRPCChannelStatus.CONNECTED.equals(status)) {
-            Channel channel = ServiceManager.INSTANCE.findService(GRPCChannelManager.class).getChannel();
-            stub = JVMMetricReportServiceGrpc.newBlockingStub(channel);
+        if (status == GRPCChannelStatus.CONNECTED && this.status == GRPCChannelStatus.DISCONNECT) {
+            reconnect();
         }
         this.status = status;
     }
 
+    private void reconnect() {
+        Channel channel = ServiceManager.INSTANCE.findService(GRPCChannelManager.class).getChannel();
+        stub = JVMMetricReportServiceGrpc.newBlockingStub(channel);
+    }
     @Override
     public void onComplete() {
 
